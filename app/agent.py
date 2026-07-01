@@ -139,7 +139,6 @@ def _extract_recommendations(
         matched = name_lower in reply_lower
 
         # Strategy 2: partial match — strip parenthetical suffixes like "(New)"
-        # e.g. "Core Java" matches "Core Java (Entry Level) (New)"
         if not matched:
             core_name = name_lower.split("(")[0].strip()
             if len(core_name) > 5 and core_name in reply_lower:
@@ -165,11 +164,10 @@ def _should_end_conversation(reply_text: str, recommendations: list) -> bool:
     if not recommendations:
         return False
     end_signals = [
+        "confirmed", "final shortlist", "final battery",
+        "that covers it", "locking it in", "locked in",
         "good luck", "best of luck", "hope this helps",
-        "let me know if you need", "feel free to ask",
-        "happy to help", "is there anything else",
-        "that completes", "here is your shortlist",
-        "here are your", "final recommendation"
+        "that completes", "final recommendation"
     ]
     reply_lower = reply_text.lower()
     return any(signal in reply_lower for signal in end_signals)
@@ -196,22 +194,15 @@ def chat(messages: list[dict]) -> dict:
     query = _build_query_from_history(messages)
 
     # Primary semantic search on the full query
-    primary_results = _retriever.search(query, top_k=12)
+    primary_results = _retriever.search(query, top_k=15)
     seen_names = {r["name"] for r in primary_results}
 
-    # Always pull OPQ32r and Verify into context — they appear in nearly
-    # every trace and can be missed when query is skill-specific
+    # One supplemental search to ensure OPQ and Verify are always in context
     supplemental_results = []
-    for supplement_query in [
-        "Occupational Personality Questionnaire OPQ32r personality behavior",
-        "SHL Verify Interactive G+ cognitive ability reasoning",
-        "SHL Verify Interactive Numerical Reasoning aptitude",
-        "SHL Verify Interactive Deductive Inductive Reasoning",
-    ]:
-        for r in _retriever.search(supplement_query, top_k=3):
-            if r["name"] not in seen_names:
-                seen_names.add(r["name"])
-                supplemental_results.append(r)
+    for r in _retriever.search("personality cognitive ability OPQ Verify reasoning", top_k=5):
+        if r["name"] not in seen_names:
+            seen_names.add(r["name"])
+            supplemental_results.append(r)
 
     catalog_results = primary_results + supplemental_results
 
