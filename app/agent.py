@@ -99,7 +99,7 @@ def _count_turns(messages: list[dict]) -> int:
 
 
 def _call_groq(system_prompt: str, messages: list[dict]) -> str:
-    """Call Groq LLM with system prompt + conversation history."""
+    """Call Groq LLM with automatic model fallback on rate limit."""
     if not GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY not set.")
 
@@ -110,14 +110,31 @@ def _call_groq(system_prompt: str, messages: list[dict]) -> str:
             "content": m["content"]
         })
 
-    response = _groq_client.chat.completions.create(
-        model="meta-llama/llama-4-scout-17b-16e-instruct",
-        messages=groq_messages,
-        temperature=0.3,
-        max_tokens=1024,
-    )
+    # Try models in order — if one hits rate limit, fall back to next
+    models = [
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
+        "qwen/qwen3-32b",
+    ]
 
-    return response.choices[0].message.content
+    last_error = None
+    for model in models:
+        try:
+            response = _groq_client.chat.completions.create(
+                model=model,
+                messages=groq_messages,
+                temperature=0.3,
+                max_tokens=1024,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if "rate_limit" in str(e).lower() or "429" in str(e):
+                last_error = e
+                continue
+            raise
+
+    raise RuntimeError(f"All models rate limited: {last_error}")
 
 
 def _extract_recommendations(
